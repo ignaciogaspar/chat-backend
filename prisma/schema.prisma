@@ -9,7 +9,7 @@ datasource db {
 
 enum MessageRole {
   user
-  geminiAssistant
+  assistant
 }
 
 model Conversation {
