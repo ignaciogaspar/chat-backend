@@ -1,4 +1,4 @@
-import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { GeminiService } from '../gemini/gemini.service';
@@ -44,6 +44,16 @@ export class MessagesService {
   }
 
   async findHistory(conversationId: string) {
+    // Primero verificamos si la conversación existe
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+    });
+    
+    if (!conversation) {
+      throw new NotFoundException(`Conversation with ID ${conversationId} not found`);
+    }
+    
+    // Si existe, entonces devolvemos sus mensajes
     return this.prisma.message.findMany({
       where: { conversationId },
       orderBy: { createdAt: 'asc' },
