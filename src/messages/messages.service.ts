@@ -11,35 +11,68 @@ export class MessagesService {
   ) {}
 
   async createAndRespond(conversationId: string, dto: CreateMessageDto) {
-    // 1. Persist user message
-    await this.prisma.message.create({
-      data: {
-        conversationId,
-        role: 'user',
-        content: dto.content,
-      },
-    });
-
+    console.log('🔵 Starting createAndRespond with:', { conversationId, content: dto.content });
+    
     try {
-      // 2. Call Gemini for a response, providing the full conversation history
+      // Verificar que la conversación existe
+      console.log('🔍 Checking if conversation exists...');
+      const conversation = await this.prisma.conversation.findUnique({
+        where: { id: conversationId },
+      });
+      
+      if (!conversation) {
+        console.log('❌ Conversation not found:', conversationId);
+        throw new NotFoundException(`Conversation with ID ${conversationId} not found`);
+      }
+      console.log('✅ Conversation found:', conversation.id);
+
+      // 1. Persist user message
+      console.log('💾 Saving user message...');
+      const userMessage = await this.prisma.message.create({
+        data: {
+          conversationId,
+          role: 'user',
+          content: dto.content,
+        },
+      });
+      console.log('✅ User message saved:', userMessage.id);
+
+      // 2. Call Gemini for a response
+      console.log('🤖 Calling Gemini API...');
       const assistantText = await this.gemini.callModelForResponse(conversationId);
+      console.log('✅ Gemini response received, length:', assistantText.length);
 
       // 3. Persist assistant's response
-      const assistantMsg = await this.prisma.message.create({
+      console.log('💾 Saving assistant message...');
+      const assistantMessage = await this.prisma.message.create({
         data: {
           conversationId,
           role: 'assistant',
           content: assistantText,
         },
       });
+      console.log('✅ Assistant message saved:', assistantMessage.id);
 
-      // 4. Return the latest assistant message
-      return assistantMsg;
-    } catch (err) {
-      if (err?.status === 429) {
-        throw new HttpException('Rate limit from Gemini', HttpStatus.TOO_MANY_REQUESTS);
+      // 4. Return only the assistant message (lo que espera tu frontend)
+      return assistantMessage;
+    } catch (error) {
+      console.error('❌ Error in createAndRespond:', error);
+      
+      if (error?.status === 429) {
+        throw new HttpException('Rate limit exceeded', HttpStatus.TOO_MANY_REQUESTS);
       }
-      throw new HttpException('Error contacting Gemini', HttpStatus.INTERNAL_SERVER_ERROR);
+      
+      // Log the full error for debugging
+      console.error('Full error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
+      
+      throw new HttpException(
+        `Error processing message: ${error.message}`, 
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
     }
   }
 

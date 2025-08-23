@@ -16,41 +16,70 @@ export class GeminiService {
   }
 
   async callModelForResponse(conversationId: string): Promise<string> {
-    if (!this.genAI) {
-      throw new HttpException('Gemini API key not configured', HttpStatus.INTERNAL_SERVER_ERROR);
-    }
+    console.log('🤖 GeminiService: Starting callModelForResponse for conversation:', conversationId);
+    
+    try {
+      if (!this.genAI) {
+        throw new Error('Gemini API not initialized properly');
+      }
 
-    const model = this.genAI.getGenerativeModel({
-      model: 'gemini-1.5-flash',
-      generationConfig: {
-        temperature: 0.9,
-        topK: 1,
-        topP: 1,
-        maxOutputTokens: 2048,
-      },
-      safetySettings: [
-        { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-        { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-        { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-        { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-      ],
-    });
+      console.log('📚 Fetching message history...');
+      const history = await this.prisma.message.findMany({
+        where: { conversationId },
+        orderBy: { createdAt: 'asc' },
+      });
+      console.log('📚 History fetched, messages count:', history.length);
 
-    const history = await this.prisma.message.findMany({
-      where: { conversationId },
-      orderBy: { createdAt: 'asc' },
-    });
+      const model = this.genAI.getGenerativeModel({ 
+        model: 'gemini-1.5-flash',
+        safetySettings: [
+          {
+            category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+            threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+          },
+          {
+            category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+            threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+          },
+          {
+            category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+            threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+          },
+          {
+            category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+            threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+          },
+        ],
+      });
 
-    const chat = model.startChat({
-      history: history.map(msg => ({
-        role: msg.role,
+      // Mapear los roles de tu base de datos a los roles de Gemini
+      const geminiHistory = history.map(msg => ({
+        role: msg.role === 'user' ? 'user' : 'model', // Cambio clave: assistant -> model
         parts: [{ text: msg.content }],
-      })),
-    });
+      }));
 
-    const lastMessage = history[history.length - 1];
-    const result = await chat.sendMessage(lastMessage.content);
-    const response = result.response;
-    return response.text();
+      console.log('🔄 Mapped history for Gemini:', geminiHistory.length, 'messages');
+
+      const chat = model.startChat({
+        history: geminiHistory,
+      });
+
+      // Obtener el último mensaje del usuario
+      const lastUserMessage = history[history.length - 1];
+      if (lastUserMessage.role !== 'user') {
+        throw new Error('Last message must be from user');
+      }
+
+      console.log('📤 Sending message to Gemini:', lastUserMessage.content);
+      const result = await chat.sendMessage(lastUserMessage.content);
+      const response = await result.response;
+      const text = response.text();
+      
+      console.log('📥 Gemini response received:', text.substring(0, 100) + '...');
+      return text;
+    } catch (error) {
+      console.error('❌ GeminiService error:', error);
+      throw error;
+    }
   }
 }
